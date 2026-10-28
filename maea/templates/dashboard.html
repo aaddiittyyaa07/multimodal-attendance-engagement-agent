@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Multimodal Attendance &amp; Engagement Agent</title>
+<style>
+:root{--bg:#f5f6fa;--card:#fff;--text:#1f2433;--mut:#6b7280;--line:#e5e7eb;--pri:#4f46e5;--hi:#16a34a;--med:#d97706;--lo:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1220;--card:#181c2e;--text:#e8eaf3;--mut:#9aa3b8;--line:#2a2f45}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+header{padding:18px 28px;background:linear-gradient(90deg,#4f46e5,#7c3aed);color:#fff}
+header h1{margin:0;font-size:20px}header p{margin:4px 0 0;opacity:.85;font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:20px;display:grid;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h2{margin:0 0 12px;font-size:15px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.stat{padding:12px;border:1px solid var(--line);border-radius:10px}.stat b{display:block;font-size:22px}.stat span{color:var(--mut);font-size:12px}
+button,input,select{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+button{background:var(--pri);color:#fff;border:0;cursor:pointer}button.sec{background:transparent;color:var(--text);border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-weight:600}
+.pill{padding:2px 9px;border-radius:99px;font-size:11px;font-weight:600;color:#fff}.High,.Present,.low-p{background:var(--hi)}.Medium,.Late,.medium{background:var(--med)}.Low,.high{background:var(--lo)}
+.low-p{background:#64748b}
+.sug{padding:10px 12px;border-left:4px solid;border-radius:6px;background:var(--bg);margin-bottom:8px}.sug.high{border-color:var(--lo);background:var(--bg)}
+.sug.medium{border-color:var(--med)}.sug.low{border-color:#64748b}.sug small{color:var(--mut)}
+canvas{width:100%;height:260px}#msg{color:var(--mut);font-size:13px}
+.note{font-size:12px;color:var(--mut)}
+</style></head><body>
+<header><h1>Multimodal Attendance &amp; Engagement Agent</h1>
+<p>Offline, privacy-preserving classroom intelligence &middot; no images or face data are stored &middot; participants are anonymous</p></header>
+<main>
+<div class="card"><h2>Run a session</h2>
+ <div class="row">
+  <input id="name" placeholder="Session name" value="Lecture 1">
+  <label>Video <input type="file" id="video" accept="video/*"></label>
+  <label>Audio (WAV, optional) <input type="file" id="audio" accept=".wav,audio/wav"></label>
+  <button onclick="run(false)">Analyse</button>
+  <button class="sec" onclick="run(true)">Run demo (simulated class)</button>
+ </div><div id="msg"></div>
+ <div class="row" style="margin-top:10px"><label>Past sessions <select id="sessions" onchange="load(this.value)"></select></label>
+ <button class="sec" onclick="del()">Delete</button><a id="csv" href="#"><button class="sec" type="button">Download attendance CSV</button></a></div>
+</div>
+<div id="view" style="display:grid;gap:16px"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);let cur=null;
+const pct=x=>x==null?'n/a':Math.round(x*100)+'%';
+const fmt=s=>String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');
+async function refresh(sel){const l=await (await fetch('/api/sessions')).json();
+ $('sessions').innerHTML=l.map(s=>`<option value="${s.id}">#${s.id} ${esc(s.name)} (${s.started_at.slice(0,16).replace('T',' ')})</option>`).join('');
+ if(l.length){const id=sel||l[0].id;$('sessions').value=id;load(id)}else $('view').innerHTML='<div class="card">No sessions yet. Run the demo to see the dashboard.</div>'}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+async function run(demo){const f=new FormData();f.append('name',$('name').value);
+ if(demo)f.append('demo','1');else{if(!$('video').files[0]){$('msg').textContent='Choose a video first.';return}
+ f.append('video',$('video').files[0]);if($('audio').files[0])f.append('audio',$('audio').files[0])}
+ $('msg').textContent='Processing locally...';const r=await (await fetch('/api/run',{method:'POST',body:f})).json();
+ if(r.error){$('msg').textContent=r.error;return}
+ const t=setInterval(async()=>{const j=await (await fetch('/api/jobs/'+r.job_id)).json();
+  if(j.status==='done'){clearInterval(t);$('msg').textContent='Done.';refresh(j.session_id)}
+  else if(j.status==='error'){clearInterval(t);$('msg').textContent='Error: '+j.error}},1000)}
+async function del(){if(cur&&confirm('Delete this session?')){await fetch('/api/sessions/'+cur,{method:'DELETE'});refresh()}}
+async function load(id){cur=id;const s=await (await fetch('/api/sessions/'+id)).json();$('csv').href=`/api/sessions/${id}/attendance.csv`;
+ const m=s.summary;
+ $('view').innerHTML=`
+ <div class="card"><h2>${esc(s.name)} <span class="note">${s.started_at.replace('T',' ')} &middot; ${s.source}</span></h2><div class="stats">
+  <div class="stat"><b>${m.participants_present}</b><span>Participants marked present</span></div>
+  <div class="stat"><b>${pct(m.avg_engagement)}</b><span>Avg engagement (${m.overall_label})</span></div>
+  <div class="stat"><b>${fmt(m.duration_sec)}</b><span>Session length</span></div>
+  <div class="stat"><b>${m.transient_ignored}</b><span>Brief appearances ignored</span></div>
+  <div class="stat"><b>${m.audio_used?'On':'Off'}</b><span>Audio analysis</span></div></div></div>
+ <div class="card"><h2>Engagement trend</h2><canvas id="ch" width="1000" height="260"></canvas>
+  <div class="note">Green = attention, Orange = audio interaction, Purple = fused engagement score per interval.</div></div>
+ <div class="card"><h2>AI teaching suggestions</h2>${s.suggestions.map(g=>`<div class="sug ${g.priority}"><b>${esc(g.title)}</b> <span class="pill ${g.priority}${g.priority=='low'?'-p':''}">${g.priority}</span> <small>${g.time_range||''}</small><br><small>${esc(g.rationale)}</small></div>`).join('')}
+  <div class="note">Suggestions are assistive only; the instructor makes all decisions.</div></div>
+ <div class="card"><h2>Attendance log</h2><table><tr><th>Participant</th><th>Status</th><th>First seen</th><th>Marked present</th><th>Last seen</th><th>Time present</th><th>Engagement</th></tr>
+ ${s.attendance.map(a=>`<tr><td>${a.participant}</td><td><span class="pill ${a.status}">${a.status}</span></td><td>${a.first_seen.slice(11)}</td><td>${a.marked_at.slice(11)}</td><td>${a.last_seen.slice(11)}</td><td>${a.present_sec}s</td><td><span class="pill ${a.engagement_label}">${a.engagement_label}</span> ${pct(a.engagement)}</td></tr>`).join('')}</table></div>
+ <div class="card"><h2>Interval details</h2><div style="overflow:auto"><table><tr><th>Interval</th><th>People</th><th>Attention</th><th>Motion</th><th>Speech</th><th>Engagement</th></tr>
+ ${s.windows.map(w=>`<tr><td>${fmt(w.start)}-${fmt(w.end)}</td><td>${w.participants}</td><td>${pct(w.attention)}</td><td>${pct(w.motion)}</td><td>${pct(w.speech_ratio)}</td><td><span class="pill ${w.label}">${w.label}</span> ${pct(w.engagement)}</td></tr>`).join('')}</table></div></div>`;
+ draw(s.windows)}
+function draw(w){const c=$('ch'),g=c.getContext('2d'),W=c.width,H=c.height,P=34,css=getComputedStyle(document.body);
+ g.clearRect(0,0,W,H);g.font='11px system-ui';g.fillStyle=css.getPropertyValue('--mut');g.strokeStyle=css.getPropertyValue('--line');
+ for(let i=0;i<=4;i++){const y=H-P-(H-2*P)*i/4;g.beginPath();g.moveTo(P,y);g.lineTo(W-10,y);g.stroke();g.fillText(i*25+'%',2,y+4)}
+ const x=i=>P+(W-P-14)*(w.length>1?i/(w.length-1):.5),y=v=>H-P-(H-2*P)*v;
+ const line=(k,col,wd)=>{g.beginPath();g.strokeStyle=col;g.lineWidth=wd;let s=false;w.forEach((q,i)=>{if(q[k]==null)return;s?g.lineTo(x(i),y(q[k])):g.moveTo(x(i),y(q[k]));s=true});g.stroke()};
+ line('attention','#16a34a',1.5);line('audio','#d97706',1.5);line('engagement','#7c3aed',3);
+ g.fillStyle=css.getPropertyValue('--mut');w.forEach((q,i)=>{if(i%Math.ceil(w.length/10)==0)g.fillText(fmt(q.start),x(i)-10,H-12)});
+ g.fillStyle='#7c3aed';w.forEach((q,i)=>{g.beginPath();g.arc(x(i),y(q.engagement),3.5,0,7);g.fill()})}
+refresh();
+</script></body></html>

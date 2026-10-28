@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+data/maea.db
+data/uploads/
+*.wav
+*.mp4
+*.avi
+.DS_Store
+.vscode/
